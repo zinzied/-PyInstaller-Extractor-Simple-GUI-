@@ -3,3 +3,5 @@ uuid
 hypothesis==2.0.0
 pyinstaller
 colorama
+customtkinter
+tkinterdnd2

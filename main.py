@@ -9,30 +9,218 @@ from colorama import Fore, Style
 from importlib.util import MAGIC_NUMBER
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
+import tkinter as tk
+from tkinterdnd2 import DND_FILES, TkinterDnD
+import threading
+import time
 
-class PyInstallerExtractorApp(ctk.CTk):
+class PyInstallerExtractorApp(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PyInstaller Extractor")
-        self.geometry("400x200")
+        self.title("PyInstaller Extractor - Enhanced")
+        self.geometry("600x450")
+        self.resizable(True, True)
 
-        self.label = ctk.CTkLabel(self, text="Select a file to extract:")
-        self.label.pack(pady=10)
+        # Configure the window
+        self.configure(bg='#2b2b2b')
 
-        self.button = ctk.CTkButton(self, text="Browse", command=self.browse_file)
-        self.button.pack(pady=10)
+        # Variables
+        self.current_file = None
+        self.extraction_thread = None
+
+        self.setup_ui()
+        self.setup_drag_drop()
+
+    def setup_ui(self):
+        # Main frame
+        main_frame = ctk.CTkFrame(self)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Title
+        title_label = ctk.CTkLabel(main_frame, text="PyInstaller Extractor",
+                                  font=ctk.CTkFont(size=24, weight="bold"))
+        title_label.pack(pady=(20, 10))
+
+        # Drag and drop area
+        self.drop_frame = ctk.CTkFrame(main_frame, height=100, corner_radius=10)
+        self.drop_frame.pack(fill="x", padx=20, pady=10)
+        self.drop_frame.pack_propagate(False)
+
+        self.drop_label = ctk.CTkLabel(self.drop_frame,
+                                      text="Drag & Drop executable file here\nor click Browse to select",
+                                      font=ctk.CTkFont(size=14))
+        self.drop_label.pack(expand=True)
+
+        # File info frame
+        self.info_frame = ctk.CTkFrame(main_frame)
+        self.info_frame.pack(fill="x", padx=20, pady=10)
+
+        self.file_label = ctk.CTkLabel(self.info_frame, text="No file selected",
+                                      font=ctk.CTkFont(size=12))
+        self.file_label.pack(pady=10)
+
+        # Buttons frame
+        button_frame = ctk.CTkFrame(main_frame)
+        button_frame.pack(fill="x", padx=20, pady=10)
+
+        self.browse_button = ctk.CTkButton(button_frame, text="Browse",
+                                          command=self.browse_file, width=120)
+        self.browse_button.pack(side="left", padx=(10, 5), pady=10)
+
+        self.extract_button = ctk.CTkButton(button_frame, text="Extract",
+                                           command=self.start_extraction,
+                                           width=120, state="disabled")
+        self.extract_button.pack(side="left", padx=5, pady=10)
+
+        self.clear_button = ctk.CTkButton(button_frame, text="Clear",
+                                         command=self.clear_selection, width=120)
+        self.clear_button.pack(side="right", padx=(5, 10), pady=10)
+
+        # Progress frame
+        progress_frame = ctk.CTkFrame(main_frame)
+        progress_frame.pack(fill="x", padx=20, pady=10)
+
+        self.status_label = ctk.CTkLabel(progress_frame, text="Ready",
+                                        font=ctk.CTkFont(size=12))
+        self.status_label.pack(pady=(10, 5))
+
+        self.progress_bar = ctk.CTkProgressBar(progress_frame, width=400)
+        self.progress_bar.pack(pady=(0, 10), padx=20)
+        self.progress_bar.set(0)
+
+        # Log frame
+        log_frame = ctk.CTkFrame(main_frame)
+        log_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+
+        log_title = ctk.CTkLabel(log_frame, text="Extraction Log",
+                                font=ctk.CTkFont(size=14, weight="bold"))
+        log_title.pack(pady=(10, 5))
+
+        # Create a text widget for logs
+        self.log_text = tk.Text(log_frame, height=8, bg='#1a1a1a', fg='#ffffff',
+                               font=('Consolas', 10), wrap=tk.WORD)
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Scrollbar for log
+        scrollbar = tk.Scrollbar(self.log_text)
+        scrollbar.pack(side="right", fill="y")
+        self.log_text.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.log_text.yview)
+
+    def setup_drag_drop(self):
+        """Setup drag and drop functionality"""
+        self.drop_target_register(DND_FILES)
+        self.dnd_bind('<<Drop>>', self.on_drop)
+
+        # Make the drop frame accept drops
+        self.drop_frame.drop_target_register(DND_FILES)
+        self.drop_frame.dnd_bind('<<Drop>>', self.on_drop)
+
+    def on_drop(self, event):
+        """Handle dropped files"""
+        files = self.tk.splitlist(event.data)
+        if files:
+            file_path = files[0]  # Take the first file
+            if file_path.lower().endswith('.exe'):
+                self.set_file(file_path)
+            else:
+                self.log_message("Error: Please drop an executable (.exe) file")
 
     def browse_file(self):
+        """Browse for file using file dialog"""
         file_path = filedialog.askopenfilename(
             title="Select an executable file",
             filetypes=[("Executable files", "*.exe"), ("All files", "*.*")]
         )
         if file_path:
-            try:
-                main(file_path)
-                messagebox.showinfo("Success", "Extraction completed successfully.")
-            except Exception as e:
-                messagebox.showerror("Error", f"An error occurred: {e}")
+            self.set_file(file_path)
+
+    def set_file(self, file_path):
+        """Set the selected file and update UI"""
+        self.current_file = file_path
+        filename = os.path.basename(file_path)
+        file_size = os.path.getsize(file_path)
+        size_mb = file_size / (1024 * 1024)
+
+        self.file_label.configure(text=f"File: {filename}\nSize: {size_mb:.2f} MB")
+        self.extract_button.configure(state="normal")
+        self.log_message(f"Selected file: {filename}")
+
+    def clear_selection(self):
+        """Clear the current file selection"""
+        self.current_file = None
+        self.file_label.configure(text="No file selected")
+        self.extract_button.configure(state="disabled")
+        self.progress_bar.set(0)
+        self.status_label.configure(text="Ready")
+        self.log_text.delete(1.0, tk.END)
+
+    def log_message(self, message):
+        """Add a message to the log"""
+        timestamp = time.strftime("%H:%M:%S")
+        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
+        self.log_text.see(tk.END)
+        self.update()
+
+    def update_progress(self, value, status=""):
+        """Update progress bar and status"""
+        self.progress_bar.set(value)
+        if status:
+            self.status_label.configure(text=status)
+        self.update()
+
+    def start_extraction(self):
+        """Start extraction in a separate thread"""
+        if not self.current_file:
+            return
+
+        self.extract_button.configure(state="disabled")
+        self.browse_button.configure(state="disabled")
+        self.clear_button.configure(state="disabled")
+
+        # Start extraction in a separate thread
+        self.extraction_thread = threading.Thread(target=self.extract_file_threaded)
+        self.extraction_thread.daemon = True
+        self.extraction_thread.start()
+
+    def extract_file_threaded(self):
+        """Extract file in a separate thread with progress updates"""
+        try:
+            self.update_progress(0.1, "Initializing extraction...")
+            self.log_message("Starting extraction process...")
+
+            # Create enhanced archive object that supports progress callbacks
+            arch = EnhancedPyInstArchive(self.current_file, self)
+
+            if arch.open():
+                self.update_progress(0.2, "Checking file format...")
+                if arch.checkFile():
+                    self.update_progress(0.3, "Reading archive information...")
+                    if arch.getCArchiveInfo():
+                        self.update_progress(0.4, "Parsing table of contents...")
+                        arch.parseTOC()
+                        self.update_progress(0.5, "Extracting files...")
+                        arch.extractFiles()
+                        arch.close()
+                        self.update_progress(1.0, "Extraction completed successfully!")
+                        self.log_message("Extraction completed successfully!")
+                        messagebox.showinfo("Success", "Extraction completed successfully!")
+                        return
+                arch.close()
+
+            self.update_progress(0, "Extraction failed")
+            self.log_message("Extraction failed!")
+            messagebox.showerror("Error", "Extraction failed!")
+
+        except Exception as e:
+            self.update_progress(0, "Error occurred")
+            self.log_message(f"Error: {str(e)}")
+            messagebox.showerror("Error", f"An error occurred: {e}")
+        finally:
+            # Re-enable buttons
+            self.extract_button.configure(state="normal")
+            self.browse_button.configure(state="normal")
+            self.clear_button.configure(state="normal")
 
 init()
 # imp is deprecated in Python3 in favour of importlib
@@ -41,6 +229,93 @@ if sys.version_info.major == 3:
     pyc_magic = MAGIC_NUMBER
 
 # The rest of your code remains unchanged
+
+class EnhancedPyInstArchive:
+    """Enhanced PyInstaller Archive class with progress callback support"""
+
+    def __init__(self, path, gui_callback=None):
+        self.archive = PyInstArchive(path)
+        self.gui = gui_callback
+
+    def open(self):
+        return self.archive.open()
+
+    def close(self):
+        return self.archive.close()
+
+    def checkFile(self):
+        result = self.archive.checkFile()
+        if self.gui:
+            if result:
+                version = "2.0" if self.archive.pyinstVer == 20 else "2.1+"
+                self.gui.log_message(f"Detected PyInstaller version: {version}")
+            else:
+                self.gui.log_message("Not a valid PyInstaller archive")
+        return result
+
+    def getCArchiveInfo(self):
+        result = self.archive.getCArchiveInfo()
+        if self.gui and result:
+            self.gui.log_message(f"Python version: {self.archive.pyver}")
+            self.gui.log_message(f"Package size: {self.archive.overlaySize} bytes")
+        return result
+
+    def parseTOC(self):
+        self.archive.parseTOC()
+        if self.gui:
+            self.gui.log_message(f"Found {len(self.archive.tocList)} files in archive")
+
+    def extractFiles(self):
+        if not hasattr(self.archive, 'tocList'):
+            return
+
+        total_files = len(self.archive.tocList)
+        if self.gui:
+            self.gui.log_message(f"Extracting {total_files} files...")
+
+        # Create extraction directory
+        extractionDir = os.path.join(os.getcwd(), os.path.basename(self.archive.filePath) + '_extracted')
+        if not os.path.exists(extractionDir):
+            os.mkdir(extractionDir)
+
+        original_dir = os.getcwd()
+        os.chdir(extractionDir)
+
+        try:
+            for i, entry in enumerate(self.archive.tocList):
+                # Update progress
+                progress = 0.5 + (i / total_files) * 0.5  # 50% to 100%
+                if self.gui:
+                    self.gui.update_progress(progress, f"Extracting: {entry.name}")
+
+                # Extract the file (using original logic)
+                basePath = os.path.dirname(entry.name)
+                if basePath != '':
+                    if not os.path.exists(basePath):
+                        os.makedirs(basePath)
+
+                self.archive.fPtr.seek(entry.position, os.SEEK_SET)
+                data = self.archive.fPtr.read(entry.cmprsdDataSize)
+
+                if entry.cmprsFlag == 1:
+                    data = zlib.decompress(data)
+
+                if entry.typeCmprsData == b's':
+                    if self.gui:
+                        self.gui.log_message(f"Found entry point: {entry.name}.pyc")
+                    self.archive._writePyc(entry.name + '.pyc', data)
+                elif entry.typeCmprsData == b'M' or entry.typeCmprsData == b'm':
+                    self.archive._writeRawData(entry.name + '.pyc', data)
+                else:
+                    self.archive._writeRawData(entry.name, data)
+                    if entry.typeCmprsData == b'z' or entry.typeCmprsData == b'Z':
+                        self.archive._extractPyz(entry.name)
+
+        finally:
+            os.chdir(original_dir)
+
+        if self.gui:
+            self.gui.log_message(f"Files extracted to: {extractionDir}")
 
 class CTOCEntry:
     def __init__(self, position, cmprsdDataSize, uncmprsdDataSize, cmprsFlag, typeCmprsData, name):
